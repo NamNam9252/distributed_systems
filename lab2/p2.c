@@ -30,9 +30,9 @@ int main(int argc, char** argv) {
         MPI_Recv(&recv_value,1,MPI_INT, left,0,MPI_COMM_WORLD,&status);
         printf("MY-Rank %d received%d from rank %d and I-sent to rank %d\n", rank, recv_value, left, right);
     int n=3;
-    while(n){
-        MPI_Recv(&recv_value,1,MPI_INT, left,0,MPI_COMM_WORLD,&status);
+    while(n){        
         MPI_Send(&send_value,1,MPI_INT,right,0,MPI_COMM_WORLD);
+        MPI_Recv(&recv_value,1,MPI_INT, left,0,MPI_COMM_WORLD,&status);
         printf("MY-Rank %d received%d from rank %d and I-sent to rank %d\n", rank, recv_value, left, right);
         n--;
     }
