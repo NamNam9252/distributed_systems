@@ -1,9 +1,10 @@
 #include <stdio.h>
 #include<mpi.h>
+#include<string.h>
 #define MAX_SIZE 100
 
 
-void doPrecessing(int rank , int size){
+void doProcessing(int rank , int size){
     int source ;
     int dest ;
     int tag =0 ;
@@ -35,6 +36,7 @@ int main(int argc, char **argv)
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &size);
     printf("Hello from process %d of %d\n", rank, size);
+    doProcessing(rank,size);
     MPI_Finalize();
     return 0;
 }
