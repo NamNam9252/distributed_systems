@@ -16,9 +16,11 @@ void doProcessing(int rank , int size){
         dest = 0 ;
         MPI_Send(message,strlen(message)+1,MPI_CHAR,dest,tag,MPI_COMM_WORLD);
     }else{
-        for(source = 1 ; source < size ; source++){
-            if(MPI_Recv(message,MAX_SIZE,MPI_CHAR,source,tag,MPI_COMM_WORLD,&status)==MPI_SUCCESS){
+        count = 0;
+        while(count < size-1){
+            if(MPI_Recv(message,MAX_SIZE,MPI_CHAR,MPI_ANY_SOURCE,MPI_ANY_TAG,MPI_COMM_WORLD,&status)==MPI_SUCCESS){
                 printf("Message from RANK %d : %s\n",source,message);
+                count++;
             }else{
                 printf("Error in receiving message from RANK %d\n",source);
             }
