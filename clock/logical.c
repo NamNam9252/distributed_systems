@@ -1,103 +1,108 @@
-#include <mpi.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
-#include <unistd.h>
+#include <mpi.h>
 
-// Helper function to find the maximum of two integers
-int max(int a, int b) {
-    return (a > b) ? a : b;
+#define MESSAGES 5
+
+void random_work()
+{
+    volatile long x = 0;
+    int loops = 1000000 + rand() % 5000000;
+
+    for (int i = 0; i < loops; i++)
+        x += i;
 }
 
-int main(int argc, char** argv) {
+/* Send a message to a destination process */
+void send_message(int *clock, int destination, int rank)
+{
+    (*clock)++;
+    MPI_Send(clock, 1, MPI_INT,
+             destination, 0, MPI_COMM_WORLD);
+
+    printf("P%d -> P%d | Sent | Clock = %d\n",
+           rank, destination, *clock);
+}
+
+/* Check and receive all waiting messages */
+void receive_messages(int *clock, int rank)
+{
+    int flag;
+    int received_clock;
+
+    MPI_Status status;
+
+    do
+    {
+        MPI_Iprobe(MPI_ANY_SOURCE, 0,
+                   MPI_COMM_WORLD, &flag, &status);
+
+        if (flag)
+        {
+            MPI_Recv(&received_clock, 1, MPI_INT,
+                     status.MPI_SOURCE, 0,
+                     MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+
+            /* Lamport clock update */
+            if (received_clock > *clock)
+                *clock = received_clock;
+
+            (*clock)++;
+
+            printf("P%d <- P%d | Received | Clock = %d\n",
+                   rank, status.MPI_SOURCE, *clock);
+        }
+
+    } while (flag);
+}
+
+int main(int argc, char *argv[])
+{
     int rank, size;
-    
-    // Initialize MPI environment
+    int clock = 0;
+
     MPI_Init(&argc, &argv);
+
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &size);
 
-    // We need at least 2 processes to send/receive messages
-    if (size < 2) {
-        if (rank == 0) {
-            printf("Please run with at least 2 processes (e.g., mpirun -np 2 ./clock)\n");
-        }
-        MPI_Finalize();
-        return 0;
-    }
-
-    // Seed the random number generator uniquely for each process
+    /* Different random seed for every process */
     srand(time(NULL) + rank);
 
-    int local_clock = 0;
-    int num_events = 5; // Number of messages each process will send
-    MPI_Request requests[num_events];
+    for (int i = 0; i < MESSAGES; i++)
+    {
+        /* Check messages that arrived */
+        receive_messages(&clock, rank);
 
-    for (int i = 0; i < num_events; i++) {
-        // 1. Add a random delay to simulate asynchronous behavior (0 to 1000 milliseconds)
-        int delay = rand() % 1000;
-        usleep(delay * 1000); 
+        /* Simulate some computation */
+        random_work();
 
-        // 2. Before sending, check if there are any incoming messages waiting
-        int has_message;
-        MPI_Status status;
-        
-        // MPI_Iprobe checks for messages without blocking
-        MPI_Iprobe(MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &has_message, &status);
-        
-        while (has_message) {
-            int received_clock;
-            // Receive the pending message
-            MPI_Recv(&received_clock, 1, MPI_INT, status.MPI_SOURCE, status.MPI_TAG, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-            
-            // Lamport Clock Receive Rule: max(local, received) + 1
-            local_clock = max(local_clock, received_clock) + 1;
-            
-            printf("[Process %d] RECEIVED msg from Process %d | Logical Clock updated to: %d\n", 
-                   rank, status.MPI_SOURCE, local_clock);
-                   
-            // Check again if more messages arrived while processing
-            MPI_Iprobe(MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &has_message, &status);
-        }
+        /* Choose a random destination */
+        int destination = rand() % size;
 
-        // 3. Prepare to send a message
-        // Pick a random target process (make sure it's not itself)
-        int target = rand() % size;
-        while (target == rank) {
-            target = rand() % size;
-        }
+        /* Don't send to ourselves */
+        while (destination == rank)
+            destination = rand() % size;
 
-        // Lamport Clock Send Rule: increment local clock before sending
-        local_clock++;
-        
-        printf("[Process %d] SENDING msg to Process %d   | Logical Clock: %d (Delay was %d ms)\n", 
-               rank, target, local_clock, delay);
-
-        // Send the message asynchronously 
-        MPI_Isend(&local_clock, 1, MPI_INT, target, 0, MPI_COMM_WORLD, &requests[i]);
+        /* Send message */
+        send_message(&clock, destination, rank);
     }
 
-    // 4. Drain remaining messages (graceful termination)
-    // Wait a brief moment to allow in-flight messages to arrive
-    usleep(1500 * 1000); 
-    
-    int has_message;
-    MPI_Status status;
-    MPI_Iprobe(MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &has_message, &status);
-    while (has_message) {
-        int received_clock;
-        MPI_Recv(&received_clock, 1, MPI_INT, status.MPI_SOURCE, status.MPI_TAG, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-        local_clock = max(local_clock, received_clock) + 1;
-        printf("[Process %d] LATE RECEIVE from Process %d | Logical Clock updated to: %d\n", 
-               rank, status.MPI_SOURCE, local_clock);
-        MPI_Iprobe(MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &has_message, &status);
+    /*
+     * Give processes time to receive
+     * messages that are still in transit.
+     */
+    for (int i = 0; i < 10; i++)
+    {
+        random_work();
+        receive_messages(&clock, rank);
     }
 
-    // Ensure all our asynchronous sends actually completed before shutting down
-    MPI_Waitall(num_events, requests, MPI_STATUSES_IGNORE);
+    printf("P%d finished | Final Clock = %d\n",
+           rank, clock);
 
-    // Sync all processes before finalizing
-    MPI_Barrier(MPI_COMM_WORLD);
     MPI_Finalize();
+
     return 0;
 }
