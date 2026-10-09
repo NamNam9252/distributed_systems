@@ -89,10 +89,6 @@ int main(int argc, char *argv[])
         send_message(&clock, destination, rank);
     }
 
-    /*
-     * Give processes time to receive
-     * messages that are still in transit.
-     */
     for (int i = 0; i < 10; i++)
     {
         random_work();

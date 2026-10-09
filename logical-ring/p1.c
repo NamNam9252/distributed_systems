@@ -2,7 +2,7 @@
 #include <stdlib.h>
 #include <mpi.h>
 
-#define ROUNDS 3
+#define ROUNDS 1
 
 void print_vector_clock(int *clock, int size)
 {
@@ -37,7 +37,7 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    int *clock = calloc(size, sizeof(int));
+    int *clock = (int*)calloc(size, sizeof(int));
 
     if (clock == NULL)
     {
@@ -52,29 +52,10 @@ int main(int argc, char *argv[])
     int received[size];
 
     MPI_Barrier(MPI_COMM_WORLD);
-
-    /*
-     * ==========================================
-     * TOKEN RING
-     * ==========================================
-     *
-     * P0 starts every round.
-     *
-     * P0 -> P1 -> P2 -> ... -> P0
-     */
-
     for (int round = 1; round <= ROUNDS; round++)
     {
-        /*
-         * --------------------------------------
-         * P0 starts the round
-         * --------------------------------------
-         */
         if (rank == 0)
         {
-            /*
-             * Sending is an event.
-             */
             clock[rank]++;
 
             printf("\n========================================\n");
@@ -88,10 +69,6 @@ int main(int argc, char *argv[])
             MPI_Send(clock, size, MPI_INT,
                      next, 0, MPI_COMM_WORLD);
 
-            /*
-             * P0 now waits for the token to
-             * complete the ring.
-             */
             MPI_Recv(received, size, MPI_INT,
                      previous, 0, MPI_COMM_WORLD,
                      MPI_STATUS_IGNORE);
@@ -101,18 +78,12 @@ int main(int argc, char *argv[])
             for (int i = 0; i < size; i++)
                 before[i] = clock[i];
 
-            /*
-             * Merge received clock.
-             */
             for (int i = 0; i < size; i++)
             {
                 if (received[i] > clock[i])
                     clock[i] = received[i];
             }
 
-            /*
-             * Receive event.
-             */
             clock[rank]++;
 
             printf("P0 <- P%d | Received = ",
@@ -128,12 +99,6 @@ int main(int argc, char *argv[])
         }
         else
         {
-            /*
-             * ----------------------------------
-             * Other processes receive token
-             * ----------------------------------
-             */
-
             MPI_Recv(received, size, MPI_INT,
                      previous, 0, MPI_COMM_WORLD,
                      MPI_STATUS_IGNORE);
@@ -151,19 +116,13 @@ int main(int argc, char *argv[])
             printf(" | Local Before = ");
 
             print_vector_clock(before, size);
-
-            /*
-             * Merge clocks.
-             */
             for (int i = 0; i < size; i++)
             {
                 if (received[i] > clock[i])
                     clock[i] = received[i];
             }
 
-            /*
-             * Receive event.
-             */
+ 
             clock[rank]++;
 
             printf(" | Updated = ");
@@ -172,9 +131,7 @@ int main(int argc, char *argv[])
 
             printf("\n");
 
-            /*
-             * Sending is another event.
-             */
+ 
             clock[rank]++;
 
             printf("P%d -> P%d | Sent = ",
@@ -184,9 +141,6 @@ int main(int argc, char *argv[])
 
             printf("\n");
 
-            /*
-             * Forward token.
-             */
             MPI_Send(clock, size, MPI_INT,
                      next, 0, MPI_COMM_WORLD);
         }

@@ -5,7 +5,7 @@
 int main(int argc, char *argv[])
 {
     int rank, size;
-    int M, N;
+    int M = 0, N = 0;
     int i, j;
 
     int *A = NULL;
@@ -18,122 +18,156 @@ int main(int argc, char *argv[])
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &size);
 
-    /* Rank 0 takes the dimensions */
     if (rank == 0)
     {
         printf("Enter number of rows (M): ");
-        scanf("%d", &M);
+        fflush(stdout);
+
+        if (scanf("%d", &M) != 1 || M <= 0)
+        {
+            fprintf(stderr, "Invalid M.\n");
+            MPI_Abort(MPI_COMM_WORLD, 1);
+        }
 
         printf("Enter number of columns (N): ");
-        scanf("%d", &N);
+        fflush(stdout);
+
+        if (scanf("%d", &N) != 1 || N <= 0)
+        {
+            fprintf(stderr, "Invalid N.\n");
+            MPI_Abort(MPI_COMM_WORLD, 1);
+        }
     }
 
-    /* Send M and N to all processes */
     MPI_Bcast(&M, 1, MPI_INT, 0, MPI_COMM_WORLD);
     MPI_Bcast(&N, 1, MPI_INT, 0, MPI_COMM_WORLD);
 
-    /* Allocate memory on every process */
-    A = (int *)malloc(M * N * sizeof(int));
-    B = (int *)malloc(M * N * sizeof(int));
+    A = malloc(M * N * sizeof(int));
+    B = malloc(M * N * sizeof(int));
 
-    /*
-     * local_C has the same size as the complete matrix.
-     * Only the assigned rows will contain useful values.
-     */
-    local_C = (int *)calloc(M * N, sizeof(int));
-
-    /* Rank 0 allocates the final matrix */
-    if (rank == 0)
+    if (A == NULL || B == NULL)
     {
-        C = (int *)malloc(M * N * sizeof(int));
+        fprintf(stderr,
+                "Rank %d: Memory allocation failed for A/B.\n",
+                rank);
+
+        MPI_Abort(MPI_COMM_WORLD, 1);
     }
 
-    /* Rank 0 reads matrix A */
     if (rank == 0)
     {
         printf("\nEnter Matrix A:\n");
+        fflush(stdout);
 
         for (i = 0; i < M; i++)
         {
             for (j = 0; j < N; j++)
             {
-                scanf("%d", &A[i * N + j]);
+                if (scanf("%d", &A[i * N + j]) != 1)
+                {
+                    fprintf(stderr, "Invalid input for Matrix A.\n");
+                    MPI_Abort(MPI_COMM_WORLD, 1);
+                }
             }
         }
 
-        /* Rank 0 reads matrix B */
         printf("\nEnter Matrix B:\n");
+        fflush(stdout);
 
         for (i = 0; i < M; i++)
         {
             for (j = 0; j < N; j++)
             {
-                scanf("%d", &B[i * N + j]);
+                if (scanf("%d", &B[i * N + j]) != 1)
+                {
+                    fprintf(stderr, "Invalid input for Matrix B.\n");
+                    MPI_Abort(MPI_COMM_WORLD, 1);
+                }
             }
         }
     }
 
-    /* Send both matrices to every process */
-    MPI_Bcast(A, M * N, MPI_INT, 0, MPI_COMM_WORLD);
-    MPI_Bcast(B, M * N, MPI_INT, 0, MPI_COMM_WORLD);
+    MPI_Bcast(
+        A,
+        M * N,
+        MPI_INT,
+        0,
+        MPI_COMM_WORLD
+    );
 
-    /*
-     * Divide rows among processes.
-     *
-     * Example:
-     * M = 100
-     * size = 10
-     *
-     * rows_per_process = 10
-     *
-     * Process 0 -> rows 0-9
-     * Process 1 -> rows 10-19
-     * Process 2 -> rows 20-29
-     * ...
-     * Process 9 -> rows 90-99
-     */
+    MPI_Bcast(
+        B,
+        M * N,
+        MPI_INT,
+        0,
+        MPI_COMM_WORLD
+    );
 
-    int rows_per_process = M / size;
+    int base_rows = M / size;
+    int remainder = M % size;
 
-    int start_row = rank * rows_per_process;
-    int end_row = start_row + rows_per_process;
+    int local_rows;
 
-    /*
-     * If M is not perfectly divisible by number of processes,
-     * the last process handles the remaining rows.
-     */
-    if (rank == size - 1)
+    if (rank < remainder)
+        local_rows = base_rows + 1;
+    else
+        local_rows = base_rows;
+
+    int start_row = rank * base_rows;
+
+    if (rank < remainder)
+        start_row += rank;
+    else
+        start_row += remainder;
+
+    int end_row = start_row + local_rows;
+
+
+    local_C = calloc(M * N, sizeof(int));
+
+    if (local_C == NULL)
     {
-        end_row = M;
+        fprintf(stderr,
+                "Rank %d: Memory allocation failed for local_C.\n",
+                rank);
+
+        MPI_Abort(MPI_COMM_WORLD, 1);
     }
 
-    /* Each process computes only its assigned rows */
+
     for (i = start_row; i < end_row; i++)
     {
         for (j = 0; j < N; j++)
         {
-            local_C[i * N + j] =
-                A[i * N + j] + B[i * N + j];
+            local_C[i * N + j] =A[i * N + j] +B[i * N + j];
         }
     }
 
-    /*
-     * Combine all partial results.
-     *
-     * Since each process has values only for its assigned rows,
-     * MPI_SUM combines them into the final matrix at rank 0.
-     */
+
+    if (rank == 0)
+    {
+        C = malloc(M * N * sizeof(int));
+
+        if (C == NULL)
+        {
+            fprintf(stderr,
+                    "Rank 0: Memory allocation failed for C.\n");
+
+            MPI_Abort(MPI_COMM_WORLD, 1);
+        }
+    }
+
     MPI_Reduce(
-        local_C,
-        C,
-        M * N,
-        MPI_INT,
-        MPI_SUM,
-        0,
-    MPI_COMM_WORLD
+        local_C,             /* send buffer */
+        C,                    /* receive buffer */
+        M * N,                /* number of elements */
+        MPI_INT,              /* data type */
+        MPI_SUM,              /* reduction operation */
+        0,                    /* root */
+        MPI_COMM_WORLD        /* communicator */
     );
 
-    /* Rank 0 prints the final matrix */
+
     if (rank == 0)
     {
         printf("\nMatrix C = A + B:\n");
@@ -144,11 +178,12 @@ int main(int argc, char *argv[])
             {
                 printf("%d ", C[i * N + j]);
             }
+
             printf("\n");
         }
     }
 
-    /* Free memory */
+
     free(A);
     free(B);
     free(local_C);
@@ -162,3 +197,4 @@ int main(int argc, char *argv[])
 
     return 0;
 }
+

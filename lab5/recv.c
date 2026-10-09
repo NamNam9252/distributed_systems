@@ -1,5 +1,3 @@
-// MPI program for two processes: rank 0 sends data and rank 1 receives it.
-
 #include <mpi.h>
 #include <stdio.h>
 #include <stdlib.h>
